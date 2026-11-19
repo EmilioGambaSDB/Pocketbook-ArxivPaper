@@ -1,0 +1,8 @@
+{
+  "name": "arxiv2pocketbook-mathjax",
+  "private": true,
+  "description": "Renders TeX to SVG for arxiv2pocketbook",
+  "dependencies": {
+    "mathjax-full": "3.2.2"
+  }
+}

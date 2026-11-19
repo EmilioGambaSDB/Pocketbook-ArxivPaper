@@ -1,0 +1,42 @@
+# Run from the Actions tab (also works from the GitHub mobile app):
+# paste one or more arXiv IDs or arxiv.org / alphaxiv.org links.
+name: Send paper to PocketBook
+on:
+  workflow_dispatch:
+    inputs:
+      papers:
+        description: arXiv IDs or arXiv/alphaXiv links (space, comma or newline separated)
+        required: true
+        type: string
+      send:
+        description: E-mail to my PocketBook (otherwise only attach the EPUB to the run)
+        type: boolean
+        default: true
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+      - name: Convert${{ inputs.send && ' and send' || '' }}
+        env:
+          PAPERS: ${{ inputs.papers }}
+          SEND: ${{ inputs.send }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          POCKETBOOK_EMAIL: ${{ secrets.POCKETBOOK_EMAIL }}
+        run: |
+          args=()
+          [ "$SEND" = "true" ] && args+=(--send)
+          arxiv2pb convert "${args[@]}" -o out -- "$PAPERS"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: papers
+          path: out/
+          if-no-files-found: ignore
