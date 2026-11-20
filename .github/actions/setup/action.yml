@@ -1,0 +1,21 @@
+name: Set up arxiv2pocketbook
+description: Python, Node (MathJax) and the package itself
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+        cache: pip
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "20"
+        cache: npm
+        cache-dependency-path: src/arxiv2pocketbook/mathjax/package-lock.json
+    - name: Install
+      shell: bash
+      run: |
+        python -c "import ctypes.util, sys; sys.exit(0 if ctypes.util.find_library('cairo') else 1)" \
+          || (sudo apt-get update -q && sudo apt-get install -y -q libcairo2)
+        pip install -e '.[dev]'
+        npm ci --prefix src/arxiv2pocketbook/mathjax --no-audit --no-fund

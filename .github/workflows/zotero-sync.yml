@@ -1,0 +1,86 @@
+# Hourly: convert and send every Zotero item tagged "to-pocketbook" (configurable),
+# then re-tag it "sent-to-pocketbook". Does nothing until the Zotero secrets are set.
+name: Zotero inbox to PocketBook
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Only list what would be sent
+        type: boolean
+        default: false
+
+concurrency:
+  group: zotero-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
+      ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
+      ZOTERO_GROUP_ID: ${{ vars.ZOTERO_GROUP_ID }}
+      ZOTERO_COLLECTION: ${{ vars.ZOTERO_COLLECTION }}
+      ZOTERO_INBOX_TAG: ${{ vars.ZOTERO_INBOX_TAG }}
+      ZOTERO_DONE_TAG: ${{ vars.ZOTERO_DONE_TAG }}
+      ZOTERO_FAILED_TAG: ${{ vars.ZOTERO_FAILED_TAG }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_PORT: ${{ secrets.SMTP_PORT }}
+      SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      SMTP_FROM: ${{ secrets.SMTP_FROM }}
+      POCKETBOOK_EMAIL: ${{ secrets.POCKETBOOK_EMAIL }}
+    steps:
+      - name: Check configuration
+        id: cfg
+        run: |
+          if [ -z "$ZOTERO_API_KEY" ]; then
+            echo "Zotero secrets not configured; skipping."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.cfg.outputs.enabled == 'true'
+      - name: Check inbox
+        id: inbox
+        if: steps.cfg.outputs.enabled == 'true'
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.parse, urllib.request
+          group = os.environ.get("ZOTERO_GROUP_ID")
+          lib = f"groups/{group}" if group else f"users/{os.environ['ZOTERO_USER_ID']}"
+          coll = os.environ.get("ZOTERO_COLLECTION")
+          path = f"collections/{coll}/items/top" if coll else "items/top"
+          params = {"limit": 1, "format": "keys"}
+          if not coll:
+              params["tag"] = os.environ.get("ZOTERO_INBOX_TAG") or "to-pocketbook"
+          req = urllib.request.Request(
+              f"https://api.zotero.org/{lib}/{path}?{urllib.parse.urlencode(params)}",
+              headers={"Zotero-API-Key": os.environ["ZOTERO_API_KEY"], "Zotero-API-Version": "3"},
+          )
+          with urllib.request.urlopen(req, timeout=60) as resp:
+              n = int(resp.headers.get("Total-Results", "0"))
+          print(f"{n} item(s) in the inbox")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              fh.write(f"pending={'true' if n else 'false'}\n")
+          PY
+      - uses: ./.github/actions/setup
+        if: steps.inbox.outputs.pending == 'true'
+      - name: Convert, send and re-tag
+        if: steps.inbox.outputs.pending == 'true'
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=()
+          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+          arxiv2pb zotero-sync "${args[@]}" -o out
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.inbox.outputs.pending == 'true'
+        with:
+          name: papers
+          path: out/
+          if-no-files-found: ignore
